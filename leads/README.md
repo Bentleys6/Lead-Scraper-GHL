@@ -16,8 +16,8 @@ Credentials come from environment variables or `leads/.env` (see `.env.example`)
 
 GHL private integration scopes: `contacts.write`, `contacts.readonly`,
 `opportunities.write`, `opportunities.readonly`, and optionally
-`locations/customFields.readonly`: with that one, if the location has custom fields named
-"Facebook"/"Instagram" they are filled in.
+`locations/customFields.readonly`: with that one, contact custom fields whose name contains
+"Facebook"/"Instagram" (e.g. "Facebook Page", since GHL reserves the plain names) are filled in.
 
 Notes
 - Contacts with neither a phone nor an email are left out of GHL (they are still in the CSV).

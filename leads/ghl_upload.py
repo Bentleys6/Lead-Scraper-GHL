@@ -72,16 +72,18 @@ class GHLClient:
         return resolved
 
     def _resolve_social_fields(self):
-        """Optional: if the location has custom fields named Facebook / Instagram,
-        populate them. Silently skipped if absent or the scope is missing."""
+        """Optional: populate contact custom fields whose name contains
+        'facebook' / 'instagram' (e.g. "Facebook Page"; GHL reserves plain
+        "Facebook"). Silently skipped if absent or the scope is missing."""
         resp = self._request("GET", f"/locations/{self.location_id}/customFields")
         if resp.status_code != 200:
             return {}
         fields = {}
         for f in resp.json().get("customFields", []):
-            name = (f.get("name") or "").strip().lower()
-            if name in ("facebook", "instagram"):
-                fields[name] = f["id"]
+            name = (f.get("name") or "").lower()
+            for key in ("facebook", "instagram"):
+                if key in name and key not in fields:
+                    fields[key] = f["id"]
         return fields
 
     def _next_pipeline(self):
@@ -181,6 +183,6 @@ def upload_leads(leads, tags, token, location_id, pipeline_names):
             print(f"  uploaded {i}/{len(leads)}")
     result["pipelines"] = per_pipeline
     if not client.social_fields:
-        result["note"] = ("No 'Facebook'/'Instagram' custom fields found in GHL, so those "
+        result["note"] = ("No Facebook/Instagram custom fields found in GHL, so those "
                           "links are in the CSV only.")
     return result
