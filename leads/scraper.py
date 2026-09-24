@@ -23,6 +23,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from counties import county_for_postcode
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(HERE, "output")
 SLUG_CACHE = os.path.join(HERE, ".slug_cache.json")
@@ -443,6 +445,10 @@ def summarise(leads, tag_names=()):
     print(f"Instagram:     {n(lambda l: l['instagram'])}")
     for tag in tag_names:
         print(f"Tag {tag + ':':<10} {n(lambda l: tag in l['tag_list'])}")
+    areas = {}
+    for lead in leads:
+        areas[lead["tag_list"][-1]] = areas.get(lead["tag_list"][-1], 0) + 1
+    print("By area:       " + ", ".join(f"{a} {c}" for a, c in sorted(areas.items(), key=lambda x: -x[1])))
 
 
 def main():
@@ -498,6 +504,10 @@ def main():
     base_tags = [args.tag] if args.tag else []
     for lead in leads:
         assign_tags(lead, base_tags, rules, args.fallback_tag)
+        # Area tag from the business's own postcode: Thomson Local's area search
+        # is a radius, so "essex" also returns East London, Suffolk, etc.
+        lead["tag_list"].append(county_for_postcode(lead["postcode"]) or args.area.title())
+        lead["tags"] = ", ".join(lead["tag_list"])
 
     leads.sort(key=lambda l: (not is_mobile(l["phone"]), not l["phone"], l["business_name"].lower()))
     for lead in leads:
@@ -525,8 +535,6 @@ def main():
 
     from ghl_upload import upload_leads
     print("\nUploading to GoHighLevel...")
-    for lead in leads:
-        lead["tag_list"].append(args.area.title())
     result = upload_leads(leads, token, location, pipelines)
     print(f"GHL: created {result['created']} / updated {result['updated']} / "
           f"failed {result['failed']} / skipped (no phone or email) {result['skipped']}")

@@ -22,6 +22,12 @@ python3 scraper.py "heating engineers" "kent" \
     --fallback-tag Boiler
 ```
 
+Area tags come from each business's own postcode (`counties.py`), not the
+search term: Thomson Local's area search is a radius, so "essex" also returns
+East London and Suffolk businesses. To fix area tags on contacts uploaded by
+an older version, use `retag_areas.py` (dry run by default, `--apply` to
+change, `--undo <backup>` to restore).
+
 Owner names are only filled when the Companies House match is unambiguous
 (same distinctive name words, plus same postcode area when needed); a blank
 owner is preferred over a wrong one.
