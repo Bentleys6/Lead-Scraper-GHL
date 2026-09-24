@@ -5,6 +5,9 @@ Companies House, write a CSV, and upload to GoHighLevel.
 Usage:
     python3 scraper.py "roofers" "surrey" --tag Roofer
     python3 scraper.py "kitchen fitters" "west yorkshire" --tag KBB --no-upload
+    python3 scraper.py "heating engineers" "kent" \
+        --keyword-tag "Heat Pump=heat pump,air source,ground source,ashp,gshp,mcs" \
+        --fallback-tag Boiler
 """
 
 import argparse
@@ -46,7 +49,14 @@ FILE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 SOCIAL_JUNK = ("sharer", "share.php", "/tr?", "/plugins/", "/dialog/", "/p/", "/reel/", "intent")
 
 CSV_COLUMNS = ["business_name", "owner_name", "location", "phone", "email",
-               "website", "facebook", "instagram"]
+               "website", "facebook", "instagram", "tags"]
+
+# Categories verified by hand where guessing slugs from the niche name fails.
+# Thomson Local has no heat pump category: "heat-pump-installers" silently
+# redirects to Central Heating, so heating niches use the real categories.
+KNOWN_SLUGS = {
+    "heating-engineers": ["central-heating", "boilers", "gas-engineers", "renewable-energy"],
+}
 
 
 # ---------------------------------------------------------------- helpers
@@ -127,6 +137,8 @@ def discover_slugs(session, niche):
     except (OSError, ValueError):
         cache = {}
     key = slugify(niche)
+    if key in KNOWN_SLUGS:
+        return KNOWN_SLUGS[key]
     if cache.get(key):
         return cache[key]
 
@@ -178,6 +190,7 @@ def parse_listing(li):
         "email": "",
         "website": web["href"].strip() if web and web.get("href") else "",
         "facebook": "", "instagram": "",
+        "site_text": "",
     }
 
 
@@ -281,6 +294,7 @@ def enrich_from_website(session, lead):
     if not resp:
         return
     info = extract_from_page(resp.text, resp.url)
+    texts = [BeautifulSoup(resp.text, "html.parser").get_text(" ")]
 
     missing = not info["emails"] or not info["facebook"] or not info["instagram"] or not info["mobile"]
     if missing and info["contact_url"]:
@@ -288,10 +302,12 @@ def enrich_from_website(session, lead):
         cresp = fetch(session, info["contact_url"])
         if cresp:
             extra = extract_from_page(cresp.text, cresp.url)
+            texts.append(BeautifulSoup(cresp.text, "html.parser").get_text(" "))
             info["emails"] += [e for e in extra["emails"] if e not in info["emails"]]
             for k in ("facebook", "instagram", "mobile"):
                 info[k] = info[k] or extra[k]
 
+    lead["site_text"] = " ".join(texts).lower()
     lead["email"] = pick_email(info["emails"], resp.url)
     lead["facebook"] = info["facebook"]
     lead["instagram"] = info["instagram"]
@@ -299,9 +315,45 @@ def enrich_from_website(session, lead):
         lead["phone"] = info["mobile"]
 
 
+# ------------------------------------------------------------ keyword tags
+
+def parse_keyword_tags(specs):
+    """'Heat Pump=heat pump,air source,mcs' -> [('Heat Pump', <regex>)]"""
+    rules = []
+    for spec in specs or []:
+        tag, _, words = spec.partition("=")
+        words = [w.strip().lower() for w in words.split(",") if w.strip()]
+        if not tag.strip() or not words:
+            sys.exit(f"Bad --keyword-tag '{spec}'. Use: \"Tag=word one,word two\"")
+        pattern = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in words) + r")\b")
+        rules.append((tag.strip(), pattern))
+    return rules
+
+
+def assign_tags(lead, base_tags, rules, fallback):
+    """Tag from evidence on the business's own website (plus its name)."""
+    text = f"{lead['business_name'].lower()} {lead.get('site_text', '')}"
+    matched = [tag for tag, pattern in rules if pattern.search(text)]
+    if not matched and fallback:
+        matched = [fallback]
+    lead["tag_list"] = list(dict.fromkeys(base_tags + matched))
+    lead["tags"] = ", ".join(lead["tag_list"])
+
+
 # ------------------------------------------------------- companies house
 
-NAME_NOISE = {"ltd", "limited", "llp", "plc", "uk", "the", "and", "co", "company", "services", "t/a"}
+NAME_NOISE = {"ltd", "limited", "llp", "plc", "uk", "the", "and", "co", "company", "t/a", "of"}
+# Trade words say nothing about *which* business it is, so they can't count
+# towards a match ("Michael Frickey Plumbing" != "Michael Chapman Plumbing").
+TRADE_WORDS = {
+    "services", "service", "plumbing", "plumbers", "plumber", "heating", "gas", "boiler",
+    "boilers", "engineers", "engineer", "engineering", "solutions", "contractors",
+    "contractor", "installations", "installers", "installer", "maintenance", "care",
+    "roofing", "roofers", "roofer", "building", "builders", "builder", "electrical",
+    "electricians", "kitchens", "kitchen", "bathrooms", "fitters", "group", "holdings",
+    "energy", "renewables", "renewable", "home", "homes", "property", "properties",
+    "southern", "south", "east", "north", "west", "safety", "systems", "technical",
+}
 
 
 def name_tokens(name):
@@ -309,18 +361,39 @@ def name_tokens(name):
             if t not in NAME_NOISE}
 
 
+def postcode_area(postcode):
+    m = re.match(r"\s*([A-Za-z]{1,2})\d", postcode or "")
+    return m.group(1).upper() if m else ""
+
+
+def format_officer_name(raw):
+    """'RAFIQ, Mohammed, Mr.' -> 'Mohammed Rafiq'"""
+    if "," not in raw:
+        return raw.title()
+    surname, rest = raw.split(",", 1)
+    forenames = [w for w in re.split(r"[\s,]+", rest)
+                 if w and w.rstrip(".").lower() not in {"mr", "mrs", "ms", "miss", "dr", "sir"}]
+    first = forenames[0] if forenames else ""
+    return f"{first.title()} {surname.strip().title()}".strip()
+
+
 class CompaniesHouseAuthError(Exception):
     pass
 
 
-def lookup_owner(session, api_key, business_name):
-    """Top search result is often the wrong company, so require a strong name match."""
-    target = name_tokens(business_name)
-    if not target:
+def lookup_owner(session, api_key, business_name, postcode=""):
+    """Only accept a company whose distinctive (non-trade) name words are
+    exactly the listing's. If several companies qualify, take the one
+    registered in the listing's postcode area, else give up: a blank owner
+    beats a wrong one. A lone match on a name of two or more distinctive words
+    is accepted from any area, since small firms often register at their
+    accountant's address."""
+    distinct = name_tokens(business_name) - TRADE_WORDS
+    if not distinct:
         return ""
     try:
         resp = session.get(f"{CH_BASE}/search/companies", timeout=15,
-                           params={"q": business_name, "items_per_page": 5}, auth=(api_key, ""))
+                           params={"q": business_name, "items_per_page": 10}, auth=(api_key, ""))
     except requests.RequestException:
         return ""
     time.sleep(CH_DELAY)
@@ -328,35 +401,36 @@ def lookup_owner(session, api_key, business_name):
         raise CompaniesHouseAuthError(resp.text[:100])
     if resp.status_code != 200:
         return ""
-    best = None
-    for item in resp.json().get("items", []):
-        if item.get("company_status") != "active":
-            continue
-        cand = name_tokens(item.get("title", ""))
-        overlap = len(target & cand) / max(len(target | cand), 1)
-        if overlap >= 0.6 and (not best or overlap > best[0]):
-            best = (overlap, item["company_number"])
-    if not best:
-        return ""
 
-    resp = fetch(session, f"{CH_BASE}/company/{best[1]}/officers", auth=(api_key, ""))
+    matches = [item for item in resp.json().get("items", [])
+               if item.get("company_status") == "active"
+               and name_tokens(item.get("title", "")) - TRADE_WORDS == distinct]
+    # With several candidates, or a one-word name ("Plumb Service") that could
+    # be anyone, insist on the same postcode area.
+    if len(matches) > 1 or len(distinct) == 1:
+        area = postcode_area(postcode)
+        matches = [m for m in matches
+                   if area and postcode_area((m.get("address") or {}).get("postal_code", "")) == area]
+    if len(matches) != 1:
+        return ""
+    number = matches[0]["company_number"]
+
+    resp = fetch(session, f"{CH_BASE}/company/{number}/officers", auth=(api_key, ""))
     time.sleep(CH_DELAY)
     if not resp:
         return ""
-    for off in resp.json().get("items", []):
-        if off.get("officer_role") == "director" and not off.get("resigned_on"):
-            raw = off.get("name", "")
-            if "," in raw:
-                surname, forenames = [p.strip() for p in raw.split(",", 1)]
-                first = forenames.split()[0] if forenames else ""
-                return f"{first.title()} {surname.title()}".strip()
-            return raw.title()
-    return ""
+    directors = [format_officer_name(o.get("name", "")) for o in resp.json().get("items", [])
+                 if o.get("officer_role") == "director" and not o.get("resigned_on")]
+    # Prefer the director whose surname is in the business name (A C Wilgar -> Wilgar).
+    for d in directors:
+        if d.split()[-1].lower() in distinct:
+            return d
+    return directors[0] if directors else ""
 
 
 # ------------------------------------------------------------------- main
 
-def summarise(leads):
+def summarise(leads, tag_names=()):
     def n(fn):
         return sum(1 for l in leads if fn(l))
     print("\n========== SUMMARY ==========")
@@ -367,17 +441,25 @@ def summarise(leads):
     print(f"Owner name:    {n(lambda l: l['owner_name'])}")
     print(f"Facebook:      {n(lambda l: l['facebook'])}")
     print(f"Instagram:     {n(lambda l: l['instagram'])}")
+    for tag in tag_names:
+        print(f"Tag {tag + ':':<10} {n(lambda l: tag in l['tag_list'])}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("niche", help='e.g. "roofers"')
     ap.add_argument("area", help='e.g. "surrey"')
-    ap.add_argument("--tag", required=True, help='niche tag for GHL, e.g. "Roofer"')
+    ap.add_argument("--tag", help='tag applied to every lead, e.g. "Roofer"')
+    ap.add_argument("--keyword-tag", action="append", metavar='"TAG=word,word"',
+                    help="tag leads whose website/name mentions any of the words (repeatable)")
+    ap.add_argument("--fallback-tag", help="tag for leads that match no --keyword-tag")
     ap.add_argument("--slugs", help="comma-separated Thomson Local slugs (skips discovery)")
     ap.add_argument("--limit", type=int, help="only process the first N leads (for testing)")
     ap.add_argument("--no-upload", action="store_true", help="write CSV only")
     args = ap.parse_args()
+    rules = parse_keyword_tags(args.keyword_tag)
+    if not (args.tag or rules or args.fallback_tag):
+        ap.error("give --tag and/or --keyword-tag / --fallback-tag")
 
     load_env()
     session = requests.Session()
@@ -407,11 +489,15 @@ def main():
         print("\nLooking up owners on Companies House...")
         try:
             for lead in leads:
-                lead["owner_name"] = lookup_owner(session, ch_key, lead["business_name"])
+                lead["owner_name"] = lookup_owner(session, ch_key, lead["business_name"], lead["postcode"])
         except CompaniesHouseAuthError as err:
             print(f"  ! Companies House rejected the API key ({err}) - owner names skipped.")
     else:
         print("\nCOMPANIES_HOUSE_API_KEY not set - skipping owner lookup.")
+
+    base_tags = [args.tag] if args.tag else []
+    for lead in leads:
+        assign_tags(lead, base_tags, rules, args.fallback_tag)
 
     leads.sort(key=lambda l: (not is_mobile(l["phone"]), not l["phone"], l["business_name"].lower()))
     for lead in leads:
@@ -425,7 +511,8 @@ def main():
         writer.writerows(leads)
     print(f"\nSaved {csv_path}")
 
-    summarise(leads)
+    tag_names = [t for t, _ in rules] + ([args.fallback_tag] if args.fallback_tag else [])
+    summarise(leads, tag_names)
 
     if args.no_upload:
         return
@@ -438,7 +525,9 @@ def main():
 
     from ghl_upload import upload_leads
     print("\nUploading to GoHighLevel...")
-    result = upload_leads(leads, [args.tag, args.area.title()], token, location, pipelines)
+    for lead in leads:
+        lead["tag_list"].append(args.area.title())
+    result = upload_leads(leads, token, location, pipelines)
     print(f"GHL: created {result['created']} / updated {result['updated']} / "
           f"failed {result['failed']} / skipped (no phone or email) {result['skipped']}")
     for name, count in result["pipelines"].items():

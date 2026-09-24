@@ -107,7 +107,7 @@ class GHLClient:
         ours = {p["id"] for p in self.pipelines}
         return any(o.get("pipelineId") in ours for o in resp.json().get("opportunities", []))
 
-    def upload(self, lead, tags):
+    def upload(self, lead):
         """Returns (status, pipeline_name) where status is created/updated/skipped/failed."""
         phone = to_e164(lead.get("phone"))
         email = lead.get("email") or ""
@@ -148,7 +148,7 @@ class GHLClient:
         contact_id = data.get("contact", {}).get("id")
         is_new = bool(data.get("new"))
 
-        self._request("POST", f"/contacts/{contact_id}/tags", json={"tags": tags})
+        self._request("POST", f"/contacts/{contact_id}/tags", json={"tags": lead["tag_list"]})
 
         pipeline_name = None
         if is_new or not self._has_opportunity(contact_id):
@@ -170,12 +170,12 @@ class GHLClient:
         return ("created" if is_new else "updated"), pipeline_name
 
 
-def upload_leads(leads, tags, token, location_id, pipeline_names):
+def upload_leads(leads, token, location_id, pipeline_names):
     client = GHLClient(token, location_id, pipeline_names)
     result = {"created": 0, "updated": 0, "failed": 0, "skipped": 0}
     per_pipeline = {p["name"]: 0 for p in client.pipelines}
     for i, lead in enumerate(leads, 1):
-        status, pipeline = client.upload(lead, tags)
+        status, pipeline = client.upload(lead)
         result[status] += 1
         if pipeline:
             per_pipeline[pipeline] += 1
