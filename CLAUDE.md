@@ -1,9 +1,8 @@
-# Marketing Agency CRM
+# Lead Scraper
 
-Two independent parts:
-- The CRM web app (repo root: `index.html`, `app/`, `lib/`).
-- A lead scraper in `leads/` that finds UK trade businesses on Thomson Local and
-  uploads them into GoHighLevel (GHL). See `leads/README.md`.
+A lead scraper in `leads/` that finds UK trade businesses on Thomson Local and
+uploads them into GoHighLevel (GHL), the user's CRM. See `leads/README.md`.
+(An older custom CRM web app used to live here; it was removed and isn't used.)
 
 ## Lead requests ("find heating engineers in Surrey")
 

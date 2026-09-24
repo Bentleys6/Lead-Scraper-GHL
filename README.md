@@ -1,20 +1,20 @@
-# Marketing Agency CRM
+# Lead Scraper
 
-A simple, self-contained CRM web app for tracking leads — no frameworks, no build step, no server required.
+Finds UK trade businesses on Thomson Local, enriches them with owner names
+(Companies House), emails and social links (their own websites), and uploads
+them into GoHighLevel, split evenly between the Noah and Luca cold calling
+pipelines.
 
-## Usage
+Everything lives in [`leads/`](leads/). See [`leads/README.md`](leads/README.md)
+for usage and settings.
 
-Open `index.html` directly in any modern browser. That's it.
+```
+pip3 install -r leads/requirements.txt
+cd leads
+python3 scraper.py "heating engineers" "kent" \
+    --keyword-tag "Heat Pump=heat pump,air source,ground source,ashp,gshp,mcs" \
+    --fallback-tag Boiler
+```
 
-## Features
-
-- **Add leads** with name, phone number, date called, notes, and location
-- **View all leads** in a clean, sortable table (newest first)
-- **Search / filter** leads by name or location in real time
-- **Delete leads** with a single click and confirmation prompt
-- **Persistent storage** — all data is saved to `localStorage` and survives page refreshes
-- **Responsive** — works on desktop and mobile screens
-
-## Tech
-
-Single HTML file with embedded CSS and vanilla JavaScript. Zero dependencies.
+Credentials (`GHL_API_KEY`, `GHL_LOCATION_ID`, `COMPANIES_HOUSE_API_KEY`) are
+read from environment variables. See `leads/.env.example`.
