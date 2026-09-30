@@ -111,8 +111,8 @@ class GHLClient:
         """Returns (status, pipeline_name) where status is created/updated/skipped/failed."""
         phone = to_e164(lead.get("phone"))
         email = lead.get("email") or ""
-        if not phone and not email:
-            return "skipped", None
+        if not phone.startswith("+447"):
+            return "skipped", None  # only 07 mobiles go into GHL
 
         first, last = split_name(lead.get("owner_name"))
         body = {

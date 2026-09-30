@@ -22,9 +22,11 @@ python3 scraper.py "heating engineers" "kent" \
     --fallback-tag Boiler
 ```
 
-`--mobile-only` keeps only leads with a 07 mobile, taken from the listing or
-found on their website; landline-only businesses are dropped before the
-Companies House and TPS steps, so they cost nothing.
+Only leads with a 07 mobile are kept (taken from the listing, or from the
+business's website when the listing shows a landline). Landline-only businesses
+are dropped before the Companies House lookup and never reach the CSV or GHL.
+`delete_non_mobile.py` removes older scraper contacts without a 07 number
+(dry run by default, `--apply` to delete, backup written first).
 
 Area tags come from each business's own postcode (`counties.py`), not the
 search term: Thomson Local's area search is a radius, so "essex" also returns
@@ -36,12 +38,6 @@ Owner names are only filled when the Companies House match is unambiguous
 (same distinctive name words, plus same postcode area when needed); a blank
 owner is preferred over a wrong one.
 
-TPS/CTPS: with `TPS_API_KEY` (TPSCheck.uk) set, every number is screened before
-upload and registered ones are left out of the CSV and GHL. Results go in
-`tps_register.json` (hashed numbers, committed) so a number isn't paid for twice;
-clear results are reused for 28 days. `tps_screen.py` screens contacts already in
-the "New Leads" stage and deletes registered ones with `--apply`.
-
 Credentials come from environment variables or `leads/.env` (see `.env.example`).
 
 GHL private integration scopes: `contacts.write`, `contacts.readonly`,
@@ -50,6 +46,5 @@ GHL private integration scopes: `contacts.write`, `contacts.readonly`,
 "Facebook"/"Instagram" (e.g. "Facebook Page", since GHL reserves the plain names) are filled in.
 
 Notes
-- Contacts with neither a phone nor an email are left out of GHL (they are still in the CSV).
 - Tags are added through the tags endpoint, so existing tags on existing contacts are kept.
 - An unrecognised area makes Thomson Local return nationwide results; the script stops instead.
