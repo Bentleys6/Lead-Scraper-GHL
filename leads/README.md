@@ -22,6 +22,10 @@ python3 scraper.py "heating engineers" "kent" \
     --fallback-tag Boiler
 ```
 
+`--mobile-only` keeps only leads with a 07 mobile, taken from the listing or
+found on their website; landline-only businesses are dropped before the
+Companies House and TPS steps, so they cost nothing.
+
 Area tags come from each business's own postcode (`counties.py`), not the
 search term: Thomson Local's area search is a radius, so "essex" also returns
 East London and Suffolk businesses. To fix area tags on contacts uploaded by

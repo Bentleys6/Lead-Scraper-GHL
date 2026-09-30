@@ -20,16 +20,19 @@ run everything yourself and report back in plain English.
    ```
    python3 -u scraper.py "heating engineers" "<area>" \
        --keyword-tag "Heat Pump=heat pump,air source,ground source,ashp,gshp,mcs" \
-       --fallback-tag Boiler > output/run_<area>.log 2>&1
+       --fallback-tag Boiler --mobile-only > output/run_<area>.log 2>&1
    ```
-   **Any other niche:** `python3 -u scraper.py "<niche>" "<area>" --tag "<Tag>"`.
+   **Any other niche:** `python3 -u scraper.py "<niche>" "<area>" --tag "<Tag>" --mobile-only`.
+
+   `--mobile-only` keeps only leads with a 07 number (the user asked for this);
+   leave it off only if they ask for landlines too. It roughly halves the leads.
    Ask the user for the tag name if they haven't given one.
 
    For several areas, run them one after another, not in parallel, or Thomson
    Local blocks the requests.
 4. When it finishes, report the summary at the end of the log: total leads,
    phone/mobile/email/owner/Facebook/Instagram counts, Heat Pump vs Boiler,
-   the by-area breakdown, TPS removed / not checked, GHL created/updated/failed,
+   the by-area breakdown, how many were dropped for having no 07 number, TPS removed / not checked, GHL created/updated/failed,
    and the Noah/Luca split. Send the CSV from `leads/output/` with SendUserFile.
 5. Commit and push `leads/tps_register.json` after every scrape or TPS run.
    It's the only record of which numbers were already checked; without it,

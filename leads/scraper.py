@@ -491,6 +491,8 @@ def main():
     ap.add_argument("--slugs", help="comma-separated Thomson Local slugs (skips discovery)")
     ap.add_argument("--limit", type=int, help="only process the first N leads (for testing)")
     ap.add_argument("--no-upload", action="store_true", help="write CSV only")
+    ap.add_argument("--mobile-only", action="store_true",
+                    help="keep only leads with a 07 mobile (from the listing or their website)")
     args = ap.parse_args()
     rules = parse_keyword_tags(args.keyword_tag)
     if not (args.tag or rules or args.fallback_tag):
@@ -518,6 +520,12 @@ def main():
             time.sleep(SITE_DELAY)
         if i % 10 == 0:
             print(f"  {i}/{len(leads)}")
+
+    if args.mobile_only:
+        # After the website check, which swaps in a mobile it finds there.
+        before = len(leads)
+        leads = [l for l in leads if is_mobile(l["phone"])]
+        print(f"\nMobile only: kept {len(leads)} of {before} (dropped {before - len(leads)} without a 07 number)")
 
     ch_key = os.environ.get("COMPANIES_HOUSE_API_KEY")
     if ch_key:
