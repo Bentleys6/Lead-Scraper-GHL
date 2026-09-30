@@ -22,6 +22,12 @@ python3 scraper.py "heating engineers" "kent" \
     --fallback-tag Boiler
 ```
 
+Only leads with a 07 mobile are kept (taken from the listing, or from the
+business's website when the listing shows a landline). Landline-only businesses
+are dropped before the Companies House lookup and never reach the CSV or GHL.
+`delete_non_mobile.py` removes older scraper contacts without a 07 number
+(dry run by default, `--apply` to delete, backup written first).
+
 Area tags come from each business's own postcode (`counties.py`), not the
 search term: Thomson Local's area search is a radius, so "essex" also returns
 East London and Suffolk businesses. To fix area tags on contacts uploaded by
@@ -40,6 +46,5 @@ GHL private integration scopes: `contacts.write`, `contacts.readonly`,
 "Facebook"/"Instagram" (e.g. "Facebook Page", since GHL reserves the plain names) are filled in.
 
 Notes
-- Contacts with neither a phone nor an email are left out of GHL (they are still in the CSV).
 - Tags are added through the tags endpoint, so existing tags on existing contacts are kept.
 - An unrecognised area makes Thomson Local return nationwide results; the script stops instead.

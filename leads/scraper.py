@@ -490,6 +490,12 @@ def main():
         if i % 10 == 0:
             print(f"  {i}/{len(leads)}")
 
+    # Only leads with a 07 mobile are kept. This runs after the website check,
+    # which swaps in a mobile found on the site for a listed landline.
+    before = len(leads)
+    leads = [l for l in leads if is_mobile(l["phone"])]
+    print(f"\nKept {len(leads)} of {before} with a 07 number (dropped {before - len(leads)})")
+
     ch_key = os.environ.get("COMPANIES_HOUSE_API_KEY")
     if ch_key:
         print("\nLooking up owners on Companies House...")
@@ -537,7 +543,7 @@ def main():
     print("\nUploading to GoHighLevel...")
     result = upload_leads(leads, token, location, pipelines)
     print(f"GHL: created {result['created']} / updated {result['updated']} / "
-          f"failed {result['failed']} / skipped (no phone or email) {result['skipped']}")
+          f"failed {result['failed']} / skipped (not a 07 number) {result['skipped']}")
     for name, count in result["pipelines"].items():
         print(f"  -> {name}: {count}")
     if result.get("note"):

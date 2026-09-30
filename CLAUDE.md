@@ -32,6 +32,11 @@ run everything yourself and report back in plain English.
    the by-area breakdown, GHL created/updated/failed, and the Noah/Luca split.
    Send the CSV from `leads/output/` with SendUserFile.
 
+Only leads with a 07 mobile are kept and uploaded (the user asked for this);
+it roughly halves the leads. Report how many were dropped for having no 07
+number. `leads/delete_non_mobile.py` removes older scraper contacts without one.
+The user has asked not to use TPS screening.
+
 For a first run in a new niche, or if the user asks for a test, add `--limit 20`.
 Use `--no-upload` only when they want the CSV without touching GHL.
 
