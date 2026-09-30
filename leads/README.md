@@ -32,6 +32,12 @@ Owner names are only filled when the Companies House match is unambiguous
 (same distinctive name words, plus same postcode area when needed); a blank
 owner is preferred over a wrong one.
 
+TPS/CTPS: with `TPS_API_KEY` (TPSCheck.uk) set, every number is screened before
+upload and registered ones are left out of the CSV and GHL. Results go in
+`tps_register.json` (hashed numbers, committed) so a number isn't paid for twice;
+clear results are reused for 28 days. `tps_screen.py` screens contacts already in
+the "New Leads" stage and deletes registered ones with `--apply`.
+
 Credentials come from environment variables or `leads/.env` (see `.env.example`).
 
 GHL private integration scopes: `contacts.write`, `contacts.readonly`,

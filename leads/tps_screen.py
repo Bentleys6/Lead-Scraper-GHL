@@ -6,56 +6,22 @@ first stage have been worked on, so they are never touched.
     python3 tps_screen.py            # dry run: screen and report
     python3 tps_screen.py --apply    # delete registered New Leads contacts
 
-Results are cached in output/tps_cache.json so a number is only paid for once.
-Screening stops cleanly when the TPSCheck allowance runs out; re-run later to
-carry on. Deleted contacts are saved to output/tps_deleted_<time>.json first.
+Every result goes in tps_register.json (see tps.py), so registered numbers are
+never paid for twice. Screening stops cleanly when the TPSCheck allowance runs
+out; re-run later to carry on. Deleted contacts are saved to output/tps_deleted_<time>.json first.
 """
 
 import argparse
 import json
 import os
-import time
 from collections import defaultdict
 from datetime import datetime
 
-import requests
-
 from retag_areas import call, client
 from scraper import OUTPUT_DIR
+from tps import Screener
 
-TPS_BASE = "https://api.tpscheck.uk"
-CACHE = os.path.join(OUTPUT_DIR, "tps_cache.json")
-
-
-class OutOfChecks(Exception):
-    pass
-
-
-def tps_session():
-    s = requests.Session()
-    s.headers.update({"Authorization": f"Token {os.environ['TPS_API_KEY']}",
-                      "Content-Type": "application/json"})
-    return s
-
-
-def tps_remaining(ts):
-    r = ts.get(TPS_BASE + "/credits/", timeout=20)
-    r.raise_for_status()
-    return r.json()
-
-
-def tps_check(ts, phone):
-    for attempt in range(4):
-        time.sleep(0.2)
-        r = ts.post(TPS_BASE + "/check", json={"phone": phone}, timeout=30)
-        if r.status_code != 429:
-            break
-        time.sleep(2 ** (attempt + 1))
-    if r.status_code in (401, 402, 403, 429):
-        raise OutOfChecks(f"{r.status_code} {r.text[:200]}")
-    r.raise_for_status()
-    d = r.json()
-    return {"tps": bool(d.get("tps")), "ctps": bool(d.get("ctps")), "valid": d.get("valid", True)}
+UNCHECKED = "TPS Not Checked"  # tag the scraper adds when it ran out of checks
 
 
 def first_stages(s, loc):
@@ -87,7 +53,6 @@ def main():
     ap.add_argument("--apply", action="store_true", help="delete registered New Leads contacts")
     args = ap.parse_args()
     s, loc = client()
-    ts = tps_session()
 
     stages = first_stages(s, loc)
     by_contact = defaultdict(list)
@@ -101,70 +66,54 @@ def main():
         else:
             worked += 1
 
-    try:
-        with open(CACHE) as fh:
-            cache = json.load(fh)
-    except (OSError, ValueError):
-        cache = {}
-
-    credits = tps_remaining(ts)
+    screener = Screener()
     print(f"Contacts with opportunities: {len(by_contact)} "
           f"(still in New Leads: {len(new_only)}, moved on and kept: {worked})")
-    print(f"TPSCheck: {credits.get('requests_remaining')} checks left on the {credits.get('plan')} plan")
+    print(f"TPSCheck: {screener.left} checks left on the {screener.credits.get('plan')} plan")
 
-    left = credits.get("requests_remaining") or 0
-    registered, clean, unscreened, no_phone, out_of_checks = [], 0, 0, 0, left <= 0
+    registered, clean, unscreened, no_phone, now_clear = [], 0, 0, 0, []
     for cid, opps in new_only:
         phone = (opps[0].get("contact") or {}).get("phone")
-        if not phone:
+        status = screener.screen(phone)
+        if not status:
             no_phone += 1
-            continue
-        if phone not in cache:
-            if out_of_checks:
-                unscreened += 1
-                continue
-            try:
-                cache[phone] = tps_check(ts, phone)
-                left -= 1
-                out_of_checks = left <= 0
-            except OutOfChecks as e:
-                print(f"  TPSCheck allowance used up: {e}")
-                out_of_checks = True
-                unscreened += 1
-                continue
-            os.makedirs(OUTPUT_DIR, exist_ok=True)
-            with open(CACHE, "w") as fh:
-                json.dump(cache, fh)
-        res = cache[phone]
-        if res["tps"] or res["ctps"]:
-            registered.append({"id": cid, "phone": phone, "tps": res["tps"], "ctps": res["ctps"],
-                               "name": opps[0].get("name"),
+        elif status == "unchecked":
+            unscreened += 1
+        elif status == "registered":
+            registered.append({"id": cid, "phone": phone, "name": opps[0].get("name"),
                                "pipelines": sorted({stages[o["pipelineId"]][0] for o in opps}),
                                "opportunity_ids": [o["id"] for o in opps]})
         else:
             clean += 1
-
+            tags = {x.lower() for x in (opps[0].get("contact") or {}).get("tags") or []}
+            if UNCHECKED.lower() in tags:
+                now_clear.append(cid)
     per_pipe = defaultdict(int)
     for r in registered:
         for p in r["pipelines"]:
             per_pipe[p] += 1
     print(f"\nScreened New Leads: {len(registered) + clean}")
-    print(f"  On TPS/CTPS: {len(registered)} "
-          f"(TPS {sum(r['tps'] for r in registered)}, CTPS {sum(r['ctps'] for r in registered)})")
+    print(f"  On TPS/CTPS: {len(registered)}")
     for p, n in sorted(per_pipe.items()):
         print(f"    {p}: {n}")
-    print(f"  Clear: {clean}")
+    print(f"  Clear: {clean}" + (f" ({len(now_clear)} still tagged '{UNCHECKED}')" if now_clear else ""))
     print(f"  Not screened yet (out of checks): {unscreened}")
     if no_phone:
         print(f"  No phone number: {no_phone}")
+    print(f"  (TPSCheck checks used this run: {screener.checks_used})")
 
     if not args.apply:
         print("\nDry run - nothing deleted. Re-run with --apply.")
         return
+    for cid in now_clear:
+        call(s, "DELETE", f"/contacts/{cid}/tags", json={"tags": [UNCHECKED]})
+    if now_clear:
+        print(f"\nRemoved '{UNCHECKED}' from {len(now_clear)} contacts now screened clear")
     if not registered:
         print("\nNothing to delete.")
         return
 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     backup = os.path.join(OUTPUT_DIR, f"tps_deleted_{datetime.now():%Y%m%d_%H%M%S}.json")
     full = []
     for r in registered:

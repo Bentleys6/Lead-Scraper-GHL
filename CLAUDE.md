@@ -11,7 +11,7 @@ run everything yourself and report back in plain English.
 
 1. Install dependencies: `pip3 install -q -r leads/requirements.txt`
 2. Check the credentials exist as environment variables (don't print their
-   values): `GHL_API_KEY`, `GHL_LOCATION_ID`, `COMPANIES_HOUSE_API_KEY`. If any
+   values): `GHL_API_KEY`, `GHL_LOCATION_ID`, `COMPANIES_HOUSE_API_KEY`, `TPS_API_KEY`. If any
    are missing, tell the user to add them in the cloud environment settings
    (environment name in the session title bar → Edit), never in chat or a file.
 3. Run from `leads/`, in the background (a county takes 15–30 minutes):
@@ -29,8 +29,11 @@ run everything yourself and report back in plain English.
    Local blocks the requests.
 4. When it finishes, report the summary at the end of the log: total leads,
    phone/mobile/email/owner/Facebook/Instagram counts, Heat Pump vs Boiler,
-   the by-area breakdown, GHL created/updated/failed, and the Noah/Luca split.
-   Send the CSV from `leads/output/` with SendUserFile.
+   the by-area breakdown, TPS removed / not checked, GHL created/updated/failed,
+   and the Noah/Luca split. Send the CSV from `leads/output/` with SendUserFile.
+5. Commit and push `leads/tps_register.json` after every scrape or TPS run.
+   It's the only record of which numbers were already checked; without it,
+   TPS numbers get re-checked (paid for again) and can be re-uploaded.
 
 For a first run in a new niche, or if the user asks for a test, add `--limit 20`.
 Use `--no-upload` only when they want the CSV without touching GHL.
@@ -40,7 +43,16 @@ Use `--no-upload` only when they want the CSV without touching GHL.
   half that county plus neighbours. Area tags come from each lead's own
   postcode, so they're accurate. For better coverage, suggest searching the
   county's main towns as well.
-- Numbers must be screened against TPS/CTPS before anyone cold calls them.
+- The scraper screens every number against TPS/CTPS (TPSCheck.uk) before
+  upload and drops registered ones. Numbers in `leads/tps_register.json` aren't
+  checked again: TPS ones never, clear ones for 28 days (ICO expects screening
+  within 28 days of a call). If the TPSCheck allowance runs out, leads are
+  still uploaded but tagged "TPS Not Checked" and must not be called.
+- `leads/tps_screen.py` screens contacts still in "New Leads" and, with
+  `--apply`, deletes the TPS/CTPS ones (the user asked for deletion). Contacts
+  moved past New Leads are never touched. Run it when the allowance renews to
+  clear any "TPS Not Checked" leads. Send the user the `tps_deleted_*.json`
+  backup it writes.
 - Heat pump firms are roughly 4% of heating engineer leads.
 
 ## GHL facts

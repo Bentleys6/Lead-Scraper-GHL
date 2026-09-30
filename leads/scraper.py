@@ -451,6 +451,35 @@ def summarise(leads, tag_names=()):
     print("By area:       " + ", ".join(f"{a} {c}" for a, c in sorted(areas.items(), key=lambda x: -x[1])))
 
 
+TPS_UNCHECKED_TAG = "TPS Not Checked"
+
+
+def screen_tps(leads):
+    """Drop leads whose number is on TPS/CTPS (in place). Numbers already in the
+    register aren't paid for again. Leads that couldn't be checked (allowance
+    used up) are kept and tagged. Returns the number removed, or None if
+    TPS_API_KEY isn't set."""
+    if not os.environ.get("TPS_API_KEY"):
+        print("\nTPS_API_KEY not set - numbers NOT screened against TPS.")
+        return None
+    from tps import Screener
+    screener = Screener()
+    print(f"\nScreening numbers against TPS/CTPS ({screener.left} checks left)...")
+    keep, removed = [], 0
+    for lead in leads:
+        status = screener.screen(lead["phone"]) if lead["phone"] else ""
+        if status == "registered":
+            removed += 1
+            continue
+        if status == "unchecked":
+            lead["tag_list"].insert(-1, TPS_UNCHECKED_TAG)  # area tag stays last
+            lead["tags"] = ", ".join(lead["tag_list"])
+        keep.append(lead)
+    leads[:] = keep
+    print(f"  {screener.checks_used} checks used")
+    return removed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("niche", help='e.g. "roofers"')
@@ -513,6 +542,8 @@ def main():
     for lead in leads:
         lead["phone"] = fmt_phone(lead["phone"])
 
+    tps_removed = screen_tps(leads)
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     csv_path = os.path.join(OUTPUT_DIR, f"{slugify(args.niche)}_{slugify(args.area)}_{date.today()}.csv")
     with open(csv_path, "w", newline="") as fh:
@@ -523,6 +554,10 @@ def main():
 
     tag_names = [t for t, _ in rules] + ([args.fallback_tag] if args.fallback_tag else [])
     summarise(leads, tag_names)
+    if tps_removed is not None:
+        unchecked = sum(TPS_UNCHECKED_TAG in l["tag_list"] for l in leads)
+        print(f"TPS/CTPS:      {tps_removed} removed, {unchecked} not checked "
+              f"(tagged '{TPS_UNCHECKED_TAG}')")
 
     if args.no_upload:
         return
