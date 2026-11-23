@@ -461,6 +461,8 @@ def main():
     ap.add_argument("--fallback-tag", help="tag for leads that match no --keyword-tag")
     ap.add_argument("--slugs", help="comma-separated Thomson Local slugs (skips discovery)")
     ap.add_argument("--limit", type=int, help="only process the first N leads (for testing)")
+    ap.add_argument("--only-pipeline", metavar="NAME",
+                    help='put new opportunities only in this pipeline, e.g. "Noah Cold Calling Pipeline"')
     ap.add_argument("--no-upload", action="store_true", help="write CSV only")
     args = ap.parse_args()
     rules = parse_keyword_tags(args.keyword_tag)
@@ -541,7 +543,7 @@ def main():
 
     from ghl_upload import upload_leads
     print("\nUploading to GoHighLevel...")
-    result = upload_leads(leads, token, location, pipelines)
+    result = upload_leads(leads, token, location, pipelines, args.only_pipeline)
     print(f"GHL: created {result['created']} / updated {result['updated']} / "
           f"failed {result['failed']} / skipped (not a 07 number) {result['skipped']}")
     for name, count in result["pipelines"].items():

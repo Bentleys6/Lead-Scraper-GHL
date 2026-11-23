@@ -30,7 +30,7 @@ def split_name(full):
 
 
 class GHLClient:
-    def __init__(self, token, location_id, pipeline_names):
+    def __init__(self, token, location_id, pipeline_names, only_pipeline=None):
         self.location_id = location_id
         self.session = requests.Session()
         self.session.headers.update({
@@ -39,7 +39,15 @@ class GHLClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
+        # All cold-calling pipelines are checked for an existing opportunity;
+        # new ones go only into `targets` (one pipeline when only_pipeline is set).
         self.pipelines = self._resolve_pipelines(pipeline_names)
+        self.targets = self.pipelines
+        if only_pipeline:
+            self.targets = [p for p in self.pipelines
+                            if p["name"].strip().lower() == only_pipeline.strip().lower()]
+            if not self.targets:
+                raise RuntimeError(f"--only-pipeline '{only_pipeline}' is not one of {pipeline_names}")
         self.social_fields = self._resolve_social_fields()
 
     def _request(self, method, path, **kwargs):
@@ -88,6 +96,8 @@ class GHLClient:
 
     def _next_pipeline(self):
         """Round-robin persisted across runs so the split stays even over time."""
+        if len(self.targets) == 1:
+            return self.targets[0]  # don't advance the rotation for a one-pipeline run
         try:
             with open(STATE_FILE) as fh:
                 state = json.load(fh)
@@ -170,10 +180,10 @@ class GHLClient:
         return ("created" if is_new else "updated"), pipeline_name
 
 
-def upload_leads(leads, token, location_id, pipeline_names):
-    client = GHLClient(token, location_id, pipeline_names)
+def upload_leads(leads, token, location_id, pipeline_names, only_pipeline=None):
+    client = GHLClient(token, location_id, pipeline_names, only_pipeline)
     result = {"created": 0, "updated": 0, "failed": 0, "skipped": 0}
-    per_pipeline = {p["name"]: 0 for p in client.pipelines}
+    per_pipeline = {p["name"]: 0 for p in client.targets}
     for i, lead in enumerate(leads, 1):
         status, pipeline = client.upload(lead)
         result[status] += 1
