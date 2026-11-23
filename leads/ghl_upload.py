@@ -53,7 +53,15 @@ class GHLClient:
     def _request(self, method, path, **kwargs):
         time.sleep(DELAY)
         for attempt in range(3):
-            resp = self.session.request(method, BASE + path, timeout=20, **kwargs)
+            try:
+                resp = self.session.request(method, BASE + path, timeout=20, **kwargs)
+            except (requests.Timeout, requests.ConnectionError):
+                # GHL occasionally stalls; retrying is safe because contacts are
+                # upserted and GHL refuses a duplicate opportunity for a contact.
+                if attempt == 2:
+                    raise
+                time.sleep(5 * (attempt + 1))
+                continue
             if resp.status_code != 429:
                 return resp
             time.sleep(2 ** (attempt + 1))
